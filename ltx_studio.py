@@ -785,14 +785,14 @@ def _(
 # ═══════════════════════ کارها (همه در پس‌زمینه) ═══════════════════════
 @app.cell(hide_code=True)
 def _(
-    IMAGE_MODELS, IMG_SIZE, JOB, LOCK, OUT, PROJECT, STYLES, aspect_dd, bump, engine, hf_token,
+    IMAGE_MODELS, IMG_SIZE, JOB, LOCK, OUT, PROJECT, STYLES, aspect_dd, engine, hf_token,
     img_btn, img_count, img_model, img_name, img_prompt, img_use_style, mo, pick_seed, rel,
     save_project, start_job, style_dd, time,
 ):
     mo.stop(not img_btn.value)
     if not img_prompt.value.strip():
         JOB.update(error=None, message="⚠️ پرامپت تصویر خالی است.", title="")
-        bump()
+        JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     else:
         _mid, _steps, _cfg = IMAGE_MODELS[img_model.value]
         _prompt = img_prompt.value.strip()
@@ -818,13 +818,13 @@ def _(
 
         if not start_job("ساخت تصویر", _work):
             JOB["message"] = "⏳ یک کار دیگر در حال انجام است؛ صبر کنید تا تمام شود."
-            bump()
+            JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
 def _(
-    EDIT_ID, EDIT_SIZE, Image, JOB, LOCK, OUT, PROJECT, STYLES, absp, aspect_dd, bump, comp_bg,
+    EDIT_ID, EDIT_SIZE, Image, JOB, LOCK, OUT, PROJECT, STYLES, absp, aspect_dd, comp_bg,
     comp_btn, comp_chars, comp_count, comp_name, comp_prompt, engine, hf_token, mo, pick_seed, rel,
     save_project, start_job, style_dd, time,
 ):
@@ -832,7 +832,7 @@ def _(
     _names = list(comp_chars.value)
     if not _names or not comp_prompt.value.strip():
         JOB.update(error=None, message="⚠️ حداقل یک کاراکتر انتخاب کنید و صحنه را توصیف کنید.", title="")
-        bump()
+        JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     else:
         _chars = PROJECT["chars"]
         _refs = [str(absp(_chars[n]["image"])) for n in _names]
@@ -871,12 +871,12 @@ def _(
 
         if not start_job("ساخت صحنه با کاراکترها", _work):
             JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
-            bump()
+            JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
-def _(JOB, LOCK, OUT, PROJECT, bump, img_upload, img_upload_btn, mo, rel, re, save_project, time):
+def _(JOB, LOCK, OUT, PROJECT, img_upload, img_upload_btn, mo, rel, re, save_project, time):
     mo.stop(not img_upload_btn.value)
     _n = 0
     for _i in range(len(img_upload.value)):
@@ -889,25 +889,25 @@ def _(JOB, LOCK, OUT, PROJECT, bump, img_upload, img_upload_btn, mo, rel, re, sa
         _n += 1
     save_project()
     JOB.update(error=None, title="", message=f"✅ {_n} تصویر اضافه شد." if _n else "⚠️ اول فایلی انتخاب کنید.")
-    bump()
+    JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
-def _(JOB, LOCK, PROJECT, bump, img_del_btn, img_del_dd, mo, save_project):
+def _(JOB, LOCK, PROJECT, img_del_btn, img_del_dd, mo, save_project):
     mo.stop(not img_del_btn.value)
     if isinstance(img_del_dd.value, int) and 0 <= img_del_dd.value < len(PROJECT["images"]):
         with LOCK:
             _x = PROJECT["images"].pop(img_del_dd.value)
         save_project()
         JOB.update(error=None, title="", message=f"🗑 «{_x['label']}» از گالری حذف شد.")
-        bump()
+        JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
 def _(
-    JOB, LOCK, OUT, PROJECT, absp, bump, char_add, char_from_gallery, char_look, char_name,
+    JOB, LOCK, OUT, PROJECT, absp, char_add, char_from_gallery, char_look, char_name,
     char_style, char_upload, char_voice, mo, rel, re, save_project, shutil, time,
 ):
     mo.stop(not char_add.value)
@@ -927,26 +927,26 @@ def _(
                                        "voice": char_voice.value.strip(), "style": char_style.value}
         save_project()
         JOB.update(error=None, title="", message=f"✅ کاراکتر «{_name}» ذخیره شد.")
-    bump()
+    JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
-def _(JOB, LOCK, PROJECT, bump, char_del_btn, char_del_dd, mo, save_project):
+def _(JOB, LOCK, PROJECT, char_del_btn, char_del_dd, mo, save_project):
     mo.stop(not char_del_btn.value)
     with LOCK:
         _ok = PROJECT["chars"].pop(char_del_dd.value, None)
     if _ok:
         save_project()
         JOB.update(error=None, title="", message=f"🗑 کاراکتر «{char_del_dd.value}» حذف شد.")
-        bump()
+        JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
 def _(
     DURATIONS, EDIT_SIZE, FINAL, Image, JOB, LOCK, OUT, PROJECT, absp, aspect_dd, best_end_frame, build_prompt,
-    bump, dur_dd, encode_mp4, engine, face_lock, gen_btn, hf_token, mo, others_ms, pick_seed,
+    dur_dd, encode_mp4, engine, face_lock, gen_btn, hf_token, mo, others_ms, pick_seed,
     quality_dd, rel, save_project, speaker_dd, start_dd, start_job, time,
 ):
     mo.stop(not gen_btn.value)
@@ -955,7 +955,7 @@ def _(
     _continued = _src == "continue"
     if _continued and not _shots:
         JOB.update(error=None, title="", message="⚠️ شات قبلی وجود ندارد؛ یک تصویر شروع انتخاب کنید.")
-        bump()
+        JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     else:
         _start_path = (str(absp(_shots[-1]["last_frame"])) if _continued
                        else str(absp(_src[4:])) if _src.startswith("img:") else None)
@@ -1013,12 +1013,12 @@ def _(
 
         if not start_job(f"ساخت شات {_num}", _work):
             JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
-            bump()
+            JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
-def _(JOB, LOCK, PROJECT, bump, mo, save_project, undo_btn):
+def _(JOB, LOCK, PROJECT, mo, save_project, undo_btn):
     mo.stop(not undo_btn.value)
     if JOB["running"]:
         JOB["message"] = "⏳ صبر کنید تا کار فعلی تمام شود."
@@ -1028,17 +1028,17 @@ def _(JOB, LOCK, PROJECT, bump, mo, save_project, undo_btn):
             PROJECT["final"] = None
         save_project()
         JOB.update(error=None, title="", message=f"↩️ شات {len(PROJECT['shots']) + 1} حذف شد. حالا می‌توانید دوباره بسازید.")
-    bump()
+    JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
-def _(FPS, JOB, LOCK, OUT, PROJECT, absp, bump, ffmpeg_exe, merge_btn, mo, re, rel, save_project, start_job, subprocess, time):
+def _(FPS, JOB, LOCK, OUT, PROJECT, absp, ffmpeg_exe, merge_btn, mo, re, rel, save_project, start_job, subprocess, time):
     mo.stop(not merge_btn.value)
     _shots = list(PROJECT["shots"])
     if not _shots:
         JOB.update(error=None, title="", message="⚠️ هنوز شاتی ساخته نشده.")
-        bump()
+        JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     else:
         def _work():
             JOB["detail"] = "چسباندن شات‌ها…"
@@ -1077,12 +1077,12 @@ def _(FPS, JOB, LOCK, OUT, PROJECT, absp, bump, ffmpeg_exe, merge_btn, mo, re, r
 
         if not start_job("ساخت فیلم نهایی", _work):
             JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
-            bump()
+            JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
-def _(JOB, LOCK, OUT, PROJECT, backup_btn, bump, mo, rel, save_project, start_job, time, zipfile):
+def _(JOB, LOCK, OUT, PROJECT, backup_btn, mo, rel, save_project, start_job, time, zipfile):
     mo.stop(not backup_btn.value)
 
     def _work():
@@ -1100,12 +1100,12 @@ def _(JOB, LOCK, OUT, PROJECT, backup_btn, bump, mo, rel, save_project, start_jo
 
     if not start_job("ساخت فایل پشتیبان", _work):
         JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
-    bump()
+    JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
 @app.cell(hide_code=True)
-def _(JOB, LOCK, OUT, PROJECT, bump, json, mo, restore_btn, restore_file, save_project, zipfile):
+def _(JOB, LOCK, OUT, PROJECT, json, mo, restore_btn, restore_file, save_project, zipfile):
     mo.stop(not restore_btn.value)
     import io as _io
     if not restore_file.value:
@@ -1128,7 +1128,7 @@ def _(JOB, LOCK, OUT, PROJECT, bump, json, mo, restore_btn, restore_file, save_p
             JOB.update(error=None, title="", message="✅ پروژه بازگردانی شد. برای برگشتن متن فرم‌ها، نوت‌بوک را یک بار Run all کنید.")
         except Exception as _e:
             JOB.update(error=f"بازگردانی ناموفق: {_e}", title="بازگردانی پروژه", trace="")
-    bump()
+    JOB["version"] += 1  # نمایش در به‌روزرسانی بعدی (بدون چرخه)
     return
 
 
