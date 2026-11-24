@@ -28,7 +28,9 @@ app = marimo.App(width="full", app_title="Battle Studio")
 @app.cell(hide_code=True)
 def _():
     import marimo as mo
-    import os, gc, json, time, random, shutil, subprocess, wave, inspect, traceback, threading, zipfile, re
+    import os
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    import gc, json, time, random, shutil, subprocess, wave, inspect, traceback, threading, zipfile, re
     from pathlib import Path
     import numpy as np
     from PIL import Image
@@ -342,6 +344,24 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
+        def clear(self):
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        def _text_models(self, where):
+            """مدل‌های متنی بزرگ فقط موقع خواندن پرامپت روی GPU هستند"""
+            for _name in ("text_encoder", "prompt_enhancer"):
+                _m = getattr(self.pipe, _name, None)
+                if _m is None or (_name == "prompt_enhancer" and where == "cuda"):
+                    continue
+                try:
+                    if next(_m.parameters()).device.type != where:
+                        _m.to(where)
+                except Exception:
+                    pass
+            self.clear()
+
         def _say(self, detail, step=0, total=0):
             if self.job is not None:
                 self.job.update(detail=detail, step=step, total=total)
@@ -382,6 +402,7 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
                     self.t2v = LTX2Pipeline(**{k: v for k, v in self.pipe.components.items() if k in _ok})
                 except Exception:
                     self.t2v = None
+                self._text_models("cpu")
             elif kind == "edit":
                 from diffusers import QwenImageEditPlusPipeline
                 self.pipe = self._load(QwenImageEditPlusPipeline, mid, token)
@@ -438,8 +459,24 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
             _dist_kw = dict(guidance_scale=1.0, audio_guidance_scale=1.0, stg_scale=0.0, audio_stg_scale=0.0,
                             modality_scale=1.0, audio_modality_scale=1.0) if _distilled else {}
 
+            _text = dict(prompt=prompt, negative_prompt=DEFAULT_NEGATIVE_PROMPT)
+            try:
+                self._say("خواندن پرامپت…")
+                self._text_models("cuda")
+                with torch.no_grad():
+                    _pe, _pm, _ne, _nm = self.pipe.encode_prompt(
+                        prompt=prompt, negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+                        do_classifier_free_guidance=not _distilled, device=torch.device("cuda"))
+                _text = dict(prompt=None, prompt_embeds=_pe, prompt_attention_mask=_pm)
+                if not _distilled:
+                    _text.update(negative_prompt_embeds=_ne, negative_prompt_attention_mask=_nm)
+            except Exception as _e:
+                _notes.append(f"خواندن جداگانه‌ی پرامپت انجام نشد ({type(_e).__name__}).")
+            finally:
+                self._text_models("cpu")
+
             def _run(img, **kw):
-                _base = dict(prompt=prompt, negative_prompt=DEFAULT_NEGATIVE_PROMPT, num_frames=nf,
+                _base = dict(**_text, num_frames=nf,
                              frame_rate=float(FPS), return_dict=False, **_dist_kw, **kw)
                 if img is not None:
                     return self.pipe(**_accepts(self.pipe.__call__, dict(image=img, **_crf, **_base)))
@@ -1062,7 +1099,15 @@ def _(
                             _start = engine.edit([_start] + _imgs, _ep, _lh, _lw, _seed, _tok)
                     JOB["title"] = f"نبرد — ساخت شات {_k + 1} از {_n} (۱۰ ثانیه)"
                     _prompt = _shot_prompt(_beats[_k], _cont)
-                    _frames, _audio, _sr, _notes = engine.video(_start, _prompt, _nf, _q, _asp, _seed, _tok)
+                    try:
+                        _frames, _audio, _sr, _notes = engine.video(_start, _prompt, _nf, _q, _asp, _seed, _tok)
+                    except Exception as _err:
+                        if "out of memory" not in str(_err).lower() or _q.startswith("720"):
+                            raise
+                        engine.clear()
+                        JOB["title"] = f"نبرد — شات {_k + 1}: حافظه کم بود، ساخت با 720p و بزرگ‌نمایی به 1080p"
+                        _frames, _audio, _sr, _notes = engine.video(_start, _prompt, _nf, "720p (1280×720)", _asp,
+                                                                    _seed, _tok)
                     JOB["detail"] = "ذخیره‌ی ویدیو…"
                     _e = best_end_frame(_frames)
                     _stamp = int(time.time())
