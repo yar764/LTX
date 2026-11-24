@@ -959,136 +959,138 @@ def _(
         JOB.update(error=None, title="", message="✅ این نبرد کامل است. برای نبرد تازه «🔄 شروع نبرد جدید» را بزنید.")
         JOB["version"] += 1
     else:
-        _chars = PROJECT["chars"]
-        _cast = [(n, str(absp(_chars[n]["image"])), _chars[n].get("look", "")) for n in _names]
-        _fight = {n: _chars[n].get("fight", "") for n in _names}
-        _mode = BATTLE_MODES[b_mode.value]
-        _lock = b_lock.value
-        _q, _asp, _tok = b_quality.value, aspect_dd.value, hf_token.value.strip()
-        _style = STYLES[style_dd.value]
-        _desc = b_desc.value.strip().rstrip(".")
-        _sfx = b_sfx.value.strip() or BATTLE_SFX
-        _nf = DURATIONS["۱۰ ثانیه"]
-        _n = len(_beats)
-        _all = ", ".join(_names[:-1]) + " and " + _names[-1]
-        _eh, _ew = EDIT_SIZE[_asp]
-        _looks = " ".join(
-            f"{n} is {look.rstrip('.')}." for n, _, look in _cast if look
-        )
-        _moves = " ".join(f"{n}'s fighting style: {f.rstrip('.')}." for n, f in _fight.items() if f)
-        _faces = (f"The faces of {_all} must be exactly identical to their reference photos: same facial structure, "
-                  "eyes, nose, mouth, skin tone, age, hair, costume, armor and weapons.")
+        def _launch():
+            _chars = PROJECT["chars"]
+            _cast = [(n, str(absp(_chars[n]["image"])), _chars[n].get("look", "")) for n in _names]
+            _fight = {n: _chars[n].get("fight", "") for n in _names}
+            _mode = BATTLE_MODES[b_mode.value]
+            _lock = b_lock.value
+            _q, _asp, _tok = b_quality.value, aspect_dd.value, hf_token.value.strip()
+            _style = STYLES[style_dd.value]
+            _desc = b_desc.value.strip().rstrip(".")
+            _sfx = b_sfx.value.strip() or BATTLE_SFX
+            _nf = DURATIONS["۱۰ ثانیه"]
+            _n = len(_beats)
+            _all = ", ".join(_names[:-1]) + " and " + _names[-1]
+            _eh, _ew = EDIT_SIZE[_asp]
+            _looks = " ".join(
+                f"{n} is {look.rstrip('.')}." for n, _, look in _cast if look
+            )
+            _moves = " ".join(f"{n}'s fighting style: {f.rstrip('.')}." for n, f in _fight.items() if f)
+            _faces = (f"The faces of {_all} must be exactly identical to their reference photos: same facial structure, "
+                      "eyes, nose, mouth, skin tone, age, hair, costume, armor and weapons.")
 
-        def _shot_prompt(beat, continued):
-            _p = [_style + ".",
-                  "Epic live-action blockbuster battle scene, photorealistic, realistic VFX, intense fast fluid fight "
-                  "choreography, powerful impacts with real weight."]
-            if _desc:
-                _p.append(_desc + ".")
-            if _looks:
-                _p.append(_looks)
-            if _moves:
-                _p.append(_moves)
-            if continued:
-                _p.append("The shot continues seamlessly from the opening frame: same location, lighting and color grade.")
-            _p.append(f"{_all} keep exactly the same faces, bodies, costumes, armor and weapons as in the opening "
-                      "frame throughout the whole shot.")
-            _p.append(beat.rstrip(".") + ".")
-            _p.append(f"Audio: {_sfx.rstrip('.')}.")
-            return " ".join(_p)
+            def _shot_prompt(beat, continued):
+                _p = [_style + ".",
+                      "Epic live-action blockbuster battle scene, photorealistic, realistic VFX, intense fast fluid fight "
+                      "choreography, powerful impacts with real weight."]
+                if _desc:
+                    _p.append(_desc + ".")
+                if _looks:
+                    _p.append(_looks)
+                if _moves:
+                    _p.append(_moves)
+                if continued:
+                    _p.append("The shot continues seamlessly from the opening frame: same location, lighting and color grade.")
+                _p.append(f"{_all} keep exactly the same faces, bodies, costumes, armor and weapons as in the opening "
+                          "frame throughout the whole shot.")
+                _p.append(beat.rstrip(".") + ".")
+                _p.append(f"Audio: {_sfx.rstrip('.')}.")
+                return " ".join(_p)
 
-        def _key_prompt(beat, with_scene):
-            _refs_first = 2 if with_scene else 1
-            _imgs, _rdesc = cast_refs(_cast, _refs_first, 3 - (1 if with_scene else 0))
-            _p = [_style + "."]
-            if with_scene:
-                _p.append("Image 1 is an earlier frame of this same battle: keep the same location, weather, lighting, "
-                          "costumes, armor and weapons.")
-            _p.append(_rdesc)
-            _p.append(("Create the next shot of the same battle from a new dramatic camera angle: " if with_scene
-                       else "Create one new widescreen cinematic film frame of an epic battle: ")
-                      + (_desc + ". " if _desc else "") + beat.rstrip(".") + ".")
-            if _moves:
-                _p.append(_moves)
-            _p.append(_faces + f" All of {_all} clearly visible, dynamic action poses, weapons in hand, sharp focus, "
-                      "photorealistic, no text, no watermark.")
-            return _imgs, " ".join(_p)
+            def _key_prompt(beat, with_scene):
+                _refs_first = 2 if with_scene else 1
+                _imgs, _rdesc = cast_refs(_cast, _refs_first, 3 - (1 if with_scene else 0))
+                _p = [_style + "."]
+                if with_scene:
+                    _p.append("Image 1 is an earlier frame of this same battle: keep the same location, weather, lighting, "
+                              "costumes, armor and weapons.")
+                _p.append(_rdesc)
+                _p.append(("Create the next shot of the same battle from a new dramatic camera angle: " if with_scene
+                           else "Create one new widescreen cinematic film frame of an epic battle: ")
+                          + (_desc + ". " if _desc else "") + beat.rstrip(".") + ".")
+                if _moves:
+                    _p.append(_moves)
+                _p.append(_faces + f" All of {_all} clearly visible, dynamic action poses, weapons in hand, sharp focus, "
+                          "photorealistic, no text, no watermark.")
+                return _imgs, " ".join(_p)
 
-        def _save_key(img, k):
-            _p = OUT / "frames" / f"battle_key_{k + 1:02d}_{int(time.time())}.png"
-            img.save(_p)
-            with LOCK:
-                PROJECT["battle"]["keys"][str(k)] = rel(_p)
-            save_project()
-            JOB["version"] += 1
-            return img
-
-        def _work():
-            engine.job = JOB
-            _B = PROJECT["battle"]
-            _t0 = time.time()
-            # ── فریم‌های کلیدی
-            if "0" not in _B["keys"]:
-                JOB["title"] = f"نبرد — صحنه‌ی آغاز (۱ از {_n})"
-                _imgs, _p = _key_prompt(_beats[0], False)
-                _save_key(engine.edit(_imgs, _p, _eh, _ew, pick_seed(), _tok), 0)
-            _first = Image.open(absp(_B["keys"]["0"])).convert("RGB")
-            if _mode == "cut":
-                for _k in range(1, _n):
-                    if str(_k) in _B["keys"] or _k < len(_B["shots"]):
-                        continue
-                    JOB["title"] = f"نبرد — فریم کلیدی شات {_k + 1} از {_n}"
-                    _imgs, _p = _key_prompt(_beats[_k], True)
-                    _save_key(engine.edit([_first] + _imgs, _p, _eh, _ew, pick_seed(), _tok), _k)
-            # ── شات‌ها
-            for _k in range(len(_B["shots"]), _n):
-                _seed = pick_seed()
-                _cont = _mode == "continue" and _k > 0
-                if _k == 0 or _mode == "cut":
-                    _start = Image.open(absp(_B["keys"][str(_k)])).convert("RGB")
-                else:
-                    _start = Image.open(absp(_B["shots"][-1]["last_frame"])).convert("RGB")
-                    if _lock:
-                        JOB["title"] = f"نبرد — قفل چهره‌ی شات {_k + 1} از {_n}"
-                        _imgs, _rdesc = cast_refs(_cast, 2, 2)
-                        _ep = (f"Image 1 is a frame from a film. {_rdesc} Edit image 1 only: make the faces, costumes "
-                               f"and weapons of {_all} exactly identical to their reference photos. Keep everything "
-                               "else in image 1 exactly unchanged: same composition, framing, body poses, motion, "
-                               "head angles, background, lighting and colors.")
-                        _w0, _h0 = _start.size
-                        _s = (1_300_000 / (_w0 * _h0)) ** 0.5
-                        _lh, _lw = max(512, int(_h0 * _s) // 16 * 16), max(512, int(_w0 * _s) // 16 * 16)
-                        _start = engine.edit([_start] + _imgs, _ep, _lh, _lw, _seed, _tok)
-                JOB["title"] = f"نبرد — ساخت شات {_k + 1} از {_n} (۱۰ ثانیه)"
-                _prompt = _shot_prompt(_beats[_k], _cont)
-                _frames, _audio, _sr, _notes = engine.video(_start, _prompt, _nf, _q, _asp, _seed, _tok)
-                JOB["detail"] = "ذخیره‌ی ویدیو…"
-                _e = best_end_frame(_frames)
-                _stamp = int(time.time())
-                _lf = OUT / "frames" / f"battle_{_k + 1:02d}_{_stamp}_last.png"
-                Image.fromarray(_frames[_e]).save(_lf)
-                _vp = OUT / "shots" / f"battle_{_k + 1:02d}_{_stamp}.mp4"
-                encode_mp4(_frames, _audio, _sr, _vp, FINAL[_q][_asp])
+            def _save_key(img, k):
+                _p = OUT / "frames" / f"battle_key_{k + 1:02d}_{int(time.time())}.png"
+                img.save(_p)
                 with LOCK:
-                    _B["shots"].append({"video": rel(_vp), "last_frame": rel(_lf), "prompt": _prompt, "seed": _seed,
-                                        "continued": _cont, "frames": int(len(_frames)), "end_frame": int(_e),
-                                        "beat": _beats[_k]})
-                    _B["final"] = None
+                    PROJECT["battle"]["keys"][str(k)] = rel(_p)
                 save_project()
                 JOB["version"] += 1
-            # ── فیلم نهایی
-            JOB["title"] = "نبرد — چسباندن شات‌ها"
-            JOB["detail"] = "ساخت فیلم نهایی…"
-            _out = concat_videos(_B["shots"], OUT / "final" / f"battle_{int(time.time())}.mp4")
-            with LOCK:
-                _B["final"] = rel(_out)
-            save_project()
-            _min = int((time.time() - _t0) / 60)
-            return f"✅ نبرد آماده شد: {len(_B['shots'])} شات، حدود {_min} دقیقه طول کشید. پایین تب «⚔️ نبرد سینمایی» است."
+                return img
 
-        if not start_job("نبرد سینمایی", _work):
-            JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
-            JOB["version"] += 1
+            def _work():
+                engine.job = JOB
+                _B = PROJECT["battle"]
+                _t0 = time.time()
+                # ── فریم‌های کلیدی
+                if "0" not in _B["keys"]:
+                    JOB["title"] = f"نبرد — صحنه‌ی آغاز (۱ از {_n})"
+                    _imgs, _p = _key_prompt(_beats[0], False)
+                    _save_key(engine.edit(_imgs, _p, _eh, _ew, pick_seed(), _tok), 0)
+                _first = Image.open(absp(_B["keys"]["0"])).convert("RGB")
+                if _mode == "cut":
+                    for _k in range(1, _n):
+                        if str(_k) in _B["keys"] or _k < len(_B["shots"]):
+                            continue
+                        JOB["title"] = f"نبرد — فریم کلیدی شات {_k + 1} از {_n}"
+                        _imgs, _p = _key_prompt(_beats[_k], True)
+                        _save_key(engine.edit([_first] + _imgs, _p, _eh, _ew, pick_seed(), _tok), _k)
+                # ── شات‌ها
+                for _k in range(len(_B["shots"]), _n):
+                    _seed = pick_seed()
+                    _cont = _mode == "continue" and _k > 0
+                    if _k == 0 or _mode == "cut":
+                        _start = Image.open(absp(_B["keys"][str(_k)])).convert("RGB")
+                    else:
+                        _start = Image.open(absp(_B["shots"][-1]["last_frame"])).convert("RGB")
+                        if _lock:
+                            JOB["title"] = f"نبرد — قفل چهره‌ی شات {_k + 1} از {_n}"
+                            _imgs, _rdesc = cast_refs(_cast, 2, 2)
+                            _ep = (f"Image 1 is a frame from a film. {_rdesc} Edit image 1 only: make the faces, costumes "
+                                   f"and weapons of {_all} exactly identical to their reference photos. Keep everything "
+                                   "else in image 1 exactly unchanged: same composition, framing, body poses, motion, "
+                                   "head angles, background, lighting and colors.")
+                            _w0, _h0 = _start.size
+                            _s = (1_300_000 / (_w0 * _h0)) ** 0.5
+                            _lh, _lw = max(512, int(_h0 * _s) // 16 * 16), max(512, int(_w0 * _s) // 16 * 16)
+                            _start = engine.edit([_start] + _imgs, _ep, _lh, _lw, _seed, _tok)
+                    JOB["title"] = f"نبرد — ساخت شات {_k + 1} از {_n} (۱۰ ثانیه)"
+                    _prompt = _shot_prompt(_beats[_k], _cont)
+                    _frames, _audio, _sr, _notes = engine.video(_start, _prompt, _nf, _q, _asp, _seed, _tok)
+                    JOB["detail"] = "ذخیره‌ی ویدیو…"
+                    _e = best_end_frame(_frames)
+                    _stamp = int(time.time())
+                    _lf = OUT / "frames" / f"battle_{_k + 1:02d}_{_stamp}_last.png"
+                    Image.fromarray(_frames[_e]).save(_lf)
+                    _vp = OUT / "shots" / f"battle_{_k + 1:02d}_{_stamp}.mp4"
+                    encode_mp4(_frames, _audio, _sr, _vp, FINAL[_q][_asp])
+                    with LOCK:
+                        _B["shots"].append({"video": rel(_vp), "last_frame": rel(_lf), "prompt": _prompt, "seed": _seed,
+                                            "continued": _cont, "frames": int(len(_frames)), "end_frame": int(_e),
+                                            "beat": _beats[_k]})
+                        _B["final"] = None
+                    save_project()
+                    JOB["version"] += 1
+                # ── فیلم نهایی
+                JOB["title"] = "نبرد — چسباندن شات‌ها"
+                JOB["detail"] = "ساخت فیلم نهایی…"
+                _out = concat_videos(_B["shots"], OUT / "final" / f"battle_{int(time.time())}.mp4")
+                with LOCK:
+                    _B["final"] = rel(_out)
+                save_project()
+                _min = int((time.time() - _t0) / 60)
+                return f"✅ نبرد آماده شد: {len(_B['shots'])} شات، حدود {_min} دقیقه طول کشید. پایین تب «⚔️ نبرد سینمایی» است."
+
+            if not start_job("نبرد سینمایی", _work):
+                JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
+                JOB["version"] += 1
+        _launch()
     return
 
 
@@ -1137,17 +1139,19 @@ def _(JOB, LOCK, OUT, PROJECT, b_merge_btn, concat_videos, mo, rel, save_project
         JOB.update(error=None, title="", message="⚠️ هنوز شات نبردی ساخته نشده.")
         JOB["version"] += 1
     else:
-        def _work():
-            JOB["detail"] = "چسباندن شات‌ها…"
-            _out = concat_videos(_B["shots"], OUT / "final" / f"battle_{int(time.time())}.mp4")
-            with LOCK:
-                _B["final"] = rel(_out)
-            save_project()
-            return "✅ فیلم نهایی نبرد دوباره ساخته شد."
+        def _launch():
+            def _work():
+                JOB["detail"] = "چسباندن شات‌ها…"
+                _out = concat_videos(_B["shots"], OUT / "final" / f"battle_{int(time.time())}.mp4")
+                with LOCK:
+                    _B["final"] = rel(_out)
+                save_project()
+                return "✅ فیلم نهایی نبرد دوباره ساخته شد."
 
-        if not start_job("فیلم نهایی نبرد", _work):
-            JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
-            JOB["version"] += 1
+            if not start_job("فیلم نهایی نبرد", _work):
+                JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
+                JOB["version"] += 1
+        _launch()
     return
 
 
