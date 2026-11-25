@@ -338,6 +338,20 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
             self.job = None
 
         def free(self):
+            # اول همه‌ی بخش‌ها از کارت گرافیک بیرون می‌روند (حتی اگر جایی هنوز به آن‌ها اشاره شده باشد)
+            for _p in (self.pipe, self.t2v, self.up):
+                if _p is None:
+                    continue
+                try:
+                    _p.reset_device_map()
+                except Exception:
+                    pass
+                for _m in list(getattr(_p, "components", {}).values()):
+                    if isinstance(_m, torch.nn.Module):
+                        try:
+                            _m.to("cpu")
+                        except Exception:
+                            pass
             self.pipe = self.t2v = self.up = None
             self.kind = self.model_id = None
             gc.collect()
@@ -372,18 +386,24 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
                 return kw
             return _f
 
-        def _load(self, cls, mid, token):
+        def _load(self, cls, mid, token, keep_cpu=()):
+            """مدل اول در رم معمولی بار می‌شود، بعد فقط بخش‌های لازم به کارت گرافیک می‌روند"""
             self._say("در حال دانلود/بارگذاری مدل (بار اول ممکن است تا ۲۰ دقیقه طول بکشد)…")
+            self.clear()
             _kw = dict(torch_dtype=torch.bfloat16, token=token or None)
             try:
-                return cls.from_pretrained(mid, device_map="cuda", **_kw)
+                _pipe = cls.from_pretrained(mid, **_kw)
             except Exception as _e:
                 if "gated" in str(_e).lower() or "401" in str(_e) or "403" in str(_e):
                     raise RuntimeError(
                         "دسترسی به مدل ندارید. در Hugging Face مجوز مدل را قبول کنید و توکن را در بالای صفحه بگذارید."
                     ) from _e
-                gc.collect()
-                return cls.from_pretrained(mid, **_kw).to("cuda")
+                raise
+            self._say("انتقال مدل به کارت گرافیک…")
+            for _name, _m in _pipe.components.items():
+                if isinstance(_m, torch.nn.Module) and _name not in keep_cpu:
+                    _m.to("cuda")
+            return _pipe
 
         def _ensure(self, kind, mid, token):
             if self.kind == kind and self.model_id == mid:
@@ -391,7 +411,8 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
             self.free()
             if kind == "video":
                 from diffusers import LTX2ImageToVideoPipeline
-                self.pipe = self._load(LTX2ImageToVideoPipeline, mid, token)
+                self.pipe = self._load(LTX2ImageToVideoPipeline, mid, token,
+                                       keep_cpu=("text_encoder", "prompt_enhancer"))
                 try:
                     self.pipe.vae.enable_tiling()
                 except Exception:
@@ -460,20 +481,30 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
                             modality_scale=1.0, audio_modality_scale=1.0) if _distilled else {}
 
             _text = dict(prompt=prompt, negative_prompt=DEFAULT_NEGATIVE_PROMPT)
-            try:
-                self._say("خواندن پرامپت…")
-                self._text_models("cuda")
+            def _encode(dev):
                 with torch.no_grad():
-                    _pe, _pm, _ne, _nm = self.pipe.encode_prompt(
+                    _r = self.pipe.encode_prompt(
                         prompt=prompt, negative_prompt=DEFAULT_NEGATIVE_PROMPT,
-                        do_classifier_free_guidance=not _distilled, device=torch.device("cuda"))
-                _text = dict(prompt=None, prompt_embeds=_pe, prompt_attention_mask=_pm)
-                if not _distilled:
-                    _text.update(negative_prompt_embeds=_ne, negative_prompt_attention_mask=_nm)
+                        do_classifier_free_guidance=not _distilled, device=torch.device(dev))
+                return [x.to("cuda") if x is not None else None for x in _r]
+
+            self._say("خواندن پرامپت…")
+            try:
+                self._text_models("cuda")
+                _pe, _pm, _ne, _nm = _encode("cuda")
             except Exception as _e:
-                _notes.append(f"خواندن جداگانه‌ی پرامپت انجام نشد ({type(_e).__name__}).")
+                if "out of memory" not in str(_e).lower():
+                    self._text_models("cpu")
+                    raise
+                # جا نشد: پرامپت روی پردازنده‌ی معمولی خوانده می‌شود (کندتر ولی بدون خطا)
+                self._text_models("cpu")
+                self._say("خواندن پرامپت روی پردازنده (چند دقیقه)…")
+                _pe, _pm, _ne, _nm = _encode("cpu")
             finally:
                 self._text_models("cpu")
+            _text = dict(prompt=None, prompt_embeds=_pe, prompt_attention_mask=_pm)
+            if not _distilled:
+                _text.update(negative_prompt_embeds=_ne, negative_prompt_attention_mask=_nm)
 
             def _run(img, **kw):
                 _base = dict(**_text, num_frames=nf,
