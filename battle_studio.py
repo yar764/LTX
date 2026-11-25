@@ -346,10 +346,12 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
                     _p.reset_device_map()
                 except Exception:
                     pass
+                # وزن‌ها مستقیم پاک می‌شوند (به رم معمولی منتقل نمی‌شوند؛ رم فقط ۳۲ گیگ است)
                 for _m in list(getattr(_p, "components", {}).values()):
                     if isinstance(_m, torch.nn.Module):
                         try:
-                            _m.to("cpu")
+                            for _t in list(_m.parameters()) + list(_m.buffers()):
+                                _t.data = torch.empty(0, dtype=_t.dtype)
                         except Exception:
                             pass
             self.pipe = self.t2v = self.up = None
@@ -386,12 +388,15 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
                 return kw
             return _f
 
-        def _load(self, cls, mid, token, keep_cpu=()):
+        def _load(self, cls, mid, token, keep_cpu=None):
             """مدل اول در رم معمولی بار می‌شود، بعد فقط بخش‌های لازم به کارت گرافیک می‌روند"""
             self._say("در حال دانلود/بارگذاری مدل (بار اول ممکن است تا ۲۰ دقیقه طول بکشد)…")
             self.clear()
             _kw = dict(torch_dtype=torch.bfloat16, token=token or None)
             try:
+                if keep_cpu is None:
+                    # مدل تصویر: مستقیم روی کارت گرافیک (مثل قبل)
+                    return cls.from_pretrained(mid, device_map="cuda", **_kw)
                 _pipe = cls.from_pretrained(mid, **_kw)
             except Exception as _e:
                 if "gated" in str(_e).lower() or "401" in str(_e) or "403" in str(_e):
