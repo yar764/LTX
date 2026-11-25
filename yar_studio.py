@@ -323,7 +323,9 @@ def _(EDIT_ID, FPS, Image, LTX_ID, OUT, gc, os, re, shutil, subprocess, torch):
                 raise RuntimeError("این بخش‌های مدل بار نشدند: " + ", ".join(_missing))
 
         def _load(self, cls, repo, token, **kw):
-            self.say("دانلود/بارگذاری مدل (بار اول ممکن است ۱۰ تا ۲۰ دقیقه طول بکشد)…", 0, 0)
+            self.say("دانلود/بارگذاری مدل (بار اول ممکن است ۱۰ تا ۲۰ دقیقه طول بکشد)…" if token else
+                     "⚠️ دانلود بدون توکن Hugging Face — خیلی کند است یا گیر می‌کند! توکن را در تب «⚙️ تنظیمات» "
+                     "بگذارید و دوباره شروع کنید…", 0, 0)
             clear()
             try:
                 return cls.from_pretrained(repo, torch_dtype=torch.bfloat16, device_map="cuda",
