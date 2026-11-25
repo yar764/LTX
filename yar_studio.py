@@ -607,7 +607,25 @@ def _(LOCK, PROJECT, cast_ms, save_project):
 
 
 @app.cell(hide_code=True)
-def _(H, JOB, bump, mo, ticker, time):
+def _(Path, os):
+    def hf_cache_gb():
+        """حجم فایل‌های دانلودشده‌ی Hugging Face (برای نمایش پیشرفت دانلود)"""
+        _root = Path(os.environ.get("HF_HUB_CACHE") or Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub")
+        _tot = 0
+        for _dp, _dn, _fn in os.walk(_root):
+            for _f in _fn:
+                try:
+                    _p = os.path.join(_dp, _f)
+                    if not os.path.islink(_p):
+                        _tot += os.path.getsize(_p)
+                except OSError:
+                    pass
+        return _tot / 1e9
+    return (hf_cache_gb,)
+
+
+@app.cell(hide_code=True)
+def _(H, JOB, bump, hf_cache_gb, mo, ticker, time):
     # نوار وضعیت؛ هر ۲ ثانیه تازه می‌شود
     ticker
     if JOB["version"] != getattr(bump, "seen", 0):
@@ -617,6 +635,16 @@ def _(H, JOB, bump, mo, ticker, time):
         _el = int(time.time() - JOB["start"])
         _pct = int(100 * JOB["step"] / JOB["total"]) if JOB["total"] else 4
         _steps = f" — {JOB['step']} از {JOB['total']}" if JOB["total"] else ""
+        if "دانلود" in JOB["detail"]:
+            # شمارنده‌ی دانلود: حجم و سرعت (اگر عدد بالا می‌رود یعنی کار گیر نکرده)
+            _gb, _now = hf_cache_gb(), time.time()
+            _prev = getattr(bump, "dl", None)
+            _spd = ""
+            if _prev and _now > _prev[1]:
+                _mbs = max(0.0, (_gb - _prev[0]) * 1000 / (_now - _prev[1]))
+                _spd = f" — سرعت: {_mbs:.0f} MB/s"
+            bump.dl = (_gb, _now)
+            _steps = f"<br>📥 دانلود شده تا الان: <b>{_gb:.1f} GB</b>{_spd}"
         _status = H(f"""<div class="y-root"><div class="y-card" style="border-color:#cfc3ff">
           <div class="y-sec">⏳ {JOB['title']}</div>
           <div>{JOB['detail']}{_steps} <span class="y-badge">{_el // 60:02d}:{_el % 60:02d}</span></div>
