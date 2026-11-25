@@ -87,9 +87,13 @@ def _():
     }
     EDIT_SIZE = {"16:9 افقی": (928, 1664), "9:16 عمودی": (1664, 928)}
     SECONDS = {"۵ ثانیه": 121, "۷ ثانیه": 169, "۱۰ ثانیه": 241}  # فریم‌ها: 8n+1
+    # چند نما در یک ساخت (قابلیت رسمی LTX 2.5): چهره‌ها و مکان بین نماهای یک کلیپ ثابت می‌مانند
+    SHOTS = {"۲ نما در هر کلیپ (پیشنهادی)": 2, "۳ نما در هر کلیپ": 3, "۱ نما (هر خط جدا)": 1}
     DEFAULT_SFX = ("cinematic orchestral score, realistic sound effects matching every action: footsteps, cloth, "
                    "impacts, ambience")
-    return DEFAULT_SFX, EDIT_ID, EDIT_SIZE, FPS, LTX_ID, NEG_ANY, NEG_REAL, QUALITY, REAL_STYLES, SECONDS, STYLES
+    return (
+        DEFAULT_SFX, EDIT_ID, EDIT_SIZE, FPS, LTX_ID, NEG_ANY, NEG_REAL, QUALITY, REAL_STYLES, SECONDS, SHOTS, STYLES,
+    )
 
 
 @app.cell(hide_code=True)
@@ -194,7 +198,7 @@ def _(threading, time, traceback):
 
 
 @app.cell(hide_code=True)
-def _(EDIT_ID, FPS, Image, LTX_ID, OUT, gc, os, re, shutil, subprocess, torch):
+def _(EDIT_ID, FPS, Image, LTX_ID, OUT, gc, os, re, shutil, subprocess, time, torch):
     # ───────────── موتور: هر لحظه فقط یک مدل روی کارت گرافیک ─────────────
     def ffmpeg_exe():
         _f = shutil.which("ffmpeg")
@@ -329,15 +333,22 @@ def _(EDIT_ID, FPS, Image, LTX_ID, OUT, gc, os, re, shutil, subprocess, torch):
                      "⚠️ دانلود بدون توکن Hugging Face — خیلی کند است یا گیر می‌کند! توکن را در تب «⚙️ تنظیمات» "
                      "بگذارید و دوباره شروع کنید…", 0, 0)
             clear()
-            try:
-                return cls.from_pretrained(repo, torch_dtype=torch.bfloat16, device_map="cuda",
-                                           token=token or None, **kw)
-            except Exception as _e:
-                _t = str(_e).lower()
-                if any(x in _t for x in ("gated", "401", "403")):
-                    raise RuntimeError(f"دسترسی به مدل {repo} ندارید (403/401). شرایط را در Hugging Face قبول کنید "
-                                       "و توکن را بگذارید.") from _e
-                raise
+            for _try in range(3):
+                try:
+                    return cls.from_pretrained(repo, torch_dtype=torch.bfloat16, device_map="cuda",
+                                               token=token or None, **kw)
+                except Exception as _e:
+                    _t = str(_e).lower()
+                    if any(x in _t for x in ("gated", "401", "403")):
+                        raise RuntimeError(f"دسترسی به مدل {repo} ندارید (403/401). شرایط را در Hugging Face قبول "
+                                           "کنید و توکن را بگذارید.") from _e
+                    # قطعی اینترنت سرور: دو بار دیگر تلاش (فایل‌های نیمه‌کاره ادامه پیدا می‌کنند)
+                    _net = any(x in _t for x in ("connection", "timed out", "timeout", "incompleteread",
+                                                 "temporarily", "reset by peer", "502", "503", "504"))
+                    if not _net or _try == 2:
+                        raise
+                    self.say(f"اینترنت سرور قطع شد؛ تلاش دوباره ({_try + 2} از ۳)…")
+                    time.sleep(15)
 
         # ── مرحله‌ی ۱: مدل تصویر
         def load_edit(self, token):
@@ -528,7 +539,7 @@ def _(H, disk_free_gb, read_env_token, torch):
 
 
 @app.cell(hide_code=True)
-def _(PROJECT, QUALITY, SECONDS, STYLES, mo, read_env_token):
+def _(PROJECT, QUALITY, SECONDS, SHOTS, STYLES, mo, read_env_token):
     _d = PROJECT["drafts"]
 
     def _pick(key, options, default):
@@ -539,7 +550,8 @@ def _(PROJECT, QUALITY, SECONDS, STYLES, mo, read_env_token):
     style_dd = mo.ui.dropdown(options=list(STYLES), value=_pick("style", STYLES, list(STYLES)[0]), label="سبک تصویر")
     aspect_dd = mo.ui.dropdown(options=_aspects, value=_pick("aspect", _aspects, _aspects[0]), label="نسبت تصویر")
     quality_dd = mo.ui.dropdown(options=list(QUALITY), value=_pick("quality", QUALITY, "720p"), label="کیفیت")
-    sec_dd = mo.ui.dropdown(options=list(SECONDS), value=_pick("seconds", SECONDS, "۷ ثانیه"), label="طول هر صحنه")
+    sec_dd = mo.ui.dropdown(options=list(SECONDS), value=_pick("seconds", SECONDS, "۱۰ ثانیه"), label="طول هر کلیپ")
+    shots_dd = mo.ui.dropdown(options=list(SHOTS), value=_pick("shots", SHOTS, list(SHOTS)[0]), label="نماها")
     story_in = mo.ui.text_area(
         value=_d.get("story", ""), rows=3, full_width=True,
         placeholder="A frozen Norse mountain plateau at dusk, ancient stone ruins, heavy falling snow, cold blue light.")
@@ -558,16 +570,17 @@ def _(PROJECT, QUALITY, SECONDS, STYLES, mo, read_env_token):
     stop_btn = mo.ui.run_button(label="⏹ توقف بعد از صحنه‌ی فعلی", kind="warn")
     reset_btn = mo.ui.run_button(label="🗑 پاک کردن همه‌ی صحنه‌ها", kind="danger")
     return (
-        aspect_dd, hf_token, img_btn, merge_btn, quality_dd, reset_btn, scenes_in, sec_dd, seed_in, sfx_in,
+        aspect_dd, hf_token, img_btn, merge_btn, quality_dd, reset_btn, scenes_in, sec_dd, seed_in, sfx_in, shots_dd,
         stop_btn, story_in, style_dd, ticker, vid_btn,
     )
 
 
 @app.cell(hide_code=True)
-def _(LOCK, PROJECT, aspect_dd, quality_dd, save_project, scenes_in, sec_dd, sfx_in, story_in, style_dd):
+def _(LOCK, PROJECT, aspect_dd, quality_dd, save_project, scenes_in, sec_dd, sfx_in, shots_dd, story_in, style_dd):
     with LOCK:
         PROJECT["drafts"].update(style=style_dd.value, aspect=aspect_dd.value, quality=quality_dd.value,
-                                 seconds=sec_dd.value, story=story_in.value, scenes=scenes_in.value, sfx=sfx_in.value)
+                                 seconds=sec_dd.value, shots=shots_dd.value, story=story_in.value,
+                                 scenes=scenes_in.value, sfx=sfx_in.value)
     save_project()
     return
 
@@ -595,8 +608,8 @@ def _(PROJECT, get_rev, mo):
                                 max_selections=4, label="شخصیت‌های این فیلم (۱ تا ۴)")
     char_del_dd = mo.ui.dropdown(options=_names or ["—"], label="شخصیت")
     char_del_btn = mo.ui.run_button(label="🗑 حذف")
-    _opts = [f"صحنه {i + 1}" for i in range(len(PROJECT["scenes"]))] or ["—"]
-    redo_dd = mo.ui.dropdown(options=_opts, value=_opts[0], label="صحنه")
+    _opts = [f"کلیپ {i + 1}" for i in range(len(PROJECT["scenes"]))] or ["—"]
+    redo_dd = mo.ui.dropdown(options=_opts, value=_opts[0], label="کلیپ")
     redo_img_btn = mo.ui.run_button(label="🖼 تصویر تازه")
     redo_vid_btn = mo.ui.run_button(label="🎬 ویدیوی تازه")
     return cast_ms, char_del_btn, char_del_dd, redo_dd, redo_img_btn, redo_vid_btn
@@ -695,7 +708,8 @@ def _(DEFAULT_SFX, REAL_STYLES, STYLES, hashlib):
                   "sharp focus, no text, no watermark.")
         return " ".join(_p)
 
-    def video_prompt(scene, cast, chars, story, style, sfx):
+    def video_prompt(shots, cast, chars, story, style, sfx):
+        """چند نما در یک کلیپ: طبق راهنمای LTX 2.5 هر کات صریح نام برده می‌شود و ظاهر شخصیت‌ها تکرار می‌شود"""
         _p = [STYLES[style] + "."]
         if style in REAL_STYLES:
             _p.append(REAL)
@@ -707,9 +721,18 @@ def _(DEFAULT_SFX, REAL_STYLES, STYLES, hashlib):
                 _p.append(f"{_n} is {_c['look'].rstrip('.')}.")
             if _c.get("role"):
                 _p.append(f"{_n}: {_c['role'].rstrip('.')}.")
-        _p.append("Every character keeps exactly the same face, body, costume and weapons as in the opening frame "
-                  "throughout the shot.")
-        _p.append(scene.strip().rstrip(".") + ".")
+        _shots = [s.strip().rstrip(".") for s in shots if s.strip()]
+        if len(_shots) == 1:
+            _p.append("Every character keeps exactly the same face, body, costume and weapons as in the opening frame "
+                      "throughout the shot.")
+            _p.append(_shots[0] + ".")
+        else:
+            _p.append(f"This video is one connected multi-shot sequence of {len(_shots)} shots joined by hard cuts, "
+                      "with the same characters, location, lighting and visual style in every shot.")
+            _p.append("It opens on the first shot: " + _shots[0] + ".")
+            for _s in _shots[1:]:
+                _p.append("Then a hard cut goes to the next shot: " + _s + ". Every character still has exactly the "
+                          "same face, body, costume and weapons.")
         _p.append("Audio: " + (sfx.strip() or DEFAULT_SFX).rstrip(".") + ".")
         return " ".join(_p)
 
@@ -720,22 +743,25 @@ def _(DEFAULT_SFX, REAL_STYLES, STYLES, hashlib):
 
 @app.cell(hide_code=True)
 def _(LOCK, PROJECT, absp, hkey, image_prompt, save_project, video_prompt):
-    def sync_scenes(lines, cast, story, style, sfx, aspect):
+    def sync_scenes(lines, cast, story, style, sfx, aspect, per=1):
         """فهرست صحنه‌ها با متن فعلی هماهنگ می‌شود؛ فقط صحنه‌هایی که چیزی‌شان عوض شده دوباره ساخته می‌شوند"""
         _chars = PROJECT["chars"]
         _refs = [str(absp(_chars[n]["image"])) for n in cast]
         _old = {s.get("ikey"): s for s in PROJECT["scenes"]}
         _new = []
         _first_key = None
-        for _i, _line in enumerate(lines):
+        _groups = [lines[k:k + per] for k in range(0, len(lines), max(1, per))]
+        for _i, _grp in enumerate(_groups):
+            _line = _grp[0]
             _ip = image_prompt(_line, _i + 1, cast, _chars, story, style, "{refs}", _i > 0)
             # تصویر هر صحنه به صحنه‌ی ۱ وابسته است (مکان یکسان)
             _ik = hkey(_ip, _refs, aspect, _first_key if _i > 0 else "")
             if _i == 0:
                 _first_key = _ik
-            _vp = video_prompt(_line, cast, _chars, story, style, sfx)
+            _vp = video_prompt(_grp, cast, _chars, story, style, sfx)
             _s = dict(_old.get(_ik) or {"ikey": _ik, "image": None, "embeds": None, "video": None})
             _s["text"] = _line
+            _s["shots"] = list(_grp)
             if _s.get("vprompt") != _vp:
                 _s.update(vprompt=_vp, embeds=None, video=None)
             _new.append(_s)
@@ -751,11 +777,11 @@ def _(LOCK, PROJECT, absp, hkey, image_prompt, save_project, video_prompt):
 def _(
     EDIT_SIZE, JOB, LOCK, NEG_ANY, NEG_REAL, OUT, PROJECT, REAL_STYLES, absp, aspect_dd, cast_ms, cast_refs,
     engine, hf_token, image_prompt, img_btn, mo, random, rel, save_project, scenes_in, seed_in, sfx_in, start_job,
-    story_in, style_dd, sync_scenes, time, use_token, Image,
+    story_in, style_dd, sync_scenes, time, use_token, Image, SHOTS, shots_dd,
 ):
     # ───────────── مرحله‌ی ۱: تصویر صحنه‌ها ─────────────
     mo.stop(not img_btn.value)
-    _lines = [l.strip() for l in scenes_in.value.splitlines() if l.strip()][:12]
+    _lines = [l.strip() for l in scenes_in.value.splitlines() if l.strip()][:24]
     _cast = [n for n in cast_ms.value if n in PROJECT["chars"]]
     if not _cast:
         JOB.update(error=None, title="", message="⚠️ در تب «📖 داستان» حداقل یک شخصیت انتخاب کنید.")
@@ -765,7 +791,7 @@ def _(
         JOB["version"] += 1
     else:
         def _launch(lines, cast, cfg):
-            _scenes = sync_scenes(lines, cast, cfg["story"], cfg["style"], cfg["sfx"], cfg["aspect"])
+            _scenes = sync_scenes(lines, cast, cfg["story"], cfg["style"], cfg["sfx"], cfg["aspect"], cfg["per"])
             _chars = PROJECT["chars"]
             _cast_t = [(n, str(absp(_chars[n]["image"])), _chars[n].get("look", "")) for n in cast]
             _neg = NEG_REAL if cfg["style"] in REAL_STYLES else NEG_ANY
@@ -782,7 +808,7 @@ def _(
                     if JOB["stop"]:
                         return "⏹ متوقف شد. هر وقت خواستید دوباره دکمه را بزنید."
                     _i = _scenes.index(_s)
-                    JOB["title"] = f"مرحله‌ی ۱ — تصویر صحنه‌ی {_i + 1} ({_j + 1} از {len(_todo)})"
+                    JOB["title"] = f"مرحله‌ی ۱ — تصویر شروع کلیپ {_i + 1} ({_j + 1} از {len(_todo)})"
                     _seed = cfg["seed"] if cfg["seed"] >= 0 else random.randint(0, 2**31 - 1)
                     if _i == 0 or not _scenes[0].get("image"):
                         _imgs, _rd = cast_refs(_cast_t, 1, 3)
@@ -808,6 +834,7 @@ def _(
 
         _launch(_lines, _cast, {
             "story": story_in.value, "style": style_dd.value, "sfx": sfx_in.value, "aspect": aspect_dd.value,
+            "per": SHOTS[shots_dd.value],
             "seed": int(seed_in.value if seed_in.value is not None else -1), "token": hf_token.value.strip(),
         })
     return
@@ -860,7 +887,7 @@ def _(
                         if JOB["stop"]:
                             return "⏹ متوقف شد. صحنه‌های ساخته‌شده ذخیره‌اند؛ دوباره دکمه را بزنید تا ادامه دهد."
                         _i = scenes.index(_s)
-                        JOB["title"] = f"مرحله‌ی ۳ — ویدیوی صحنه‌ی {_i + 1} ({_j + 1} از {len(_make)})"
+                        JOB["title"] = f"مرحله‌ی ۳ — ویدیوی کلیپ {_i + 1} ({_j + 1} از {len(_make)})"
                         _e = torch.load(absp(_s["embeds"]), weights_only=False)
                         _img = Image.open(absp(_s["image"])).convert("RGB")
                         _seed = cfg["seed"] if cfg["seed"] >= 0 else random.randint(0, 2**31 - 1)
@@ -871,7 +898,7 @@ def _(
                             if "out of memory" not in str(_err).lower() or cfg["stage1"] == cfg["stage1_720"]:
                                 raise
                             clear()
-                            engine.say(f"صحنه‌ی {_i + 1}: حافظه برای 1080p کم بود؛ ساخت با 720p")
+                            engine.say(f"کلیپ {_i + 1}: حافظه برای 1080p کم بود؛ ساخت با 720p")
                             engine.make(_img, _e, cfg["nf"], cfg["stage1_720"], _seed, _vp)
                         with LOCK:
                             _s.update(video=rel(_vp), seed=_seed)
@@ -885,7 +912,7 @@ def _(
                 with LOCK:
                     PROJECT["final"] = rel(_out)
                 save_project()
-                return f"✅ فیلم آماده شد: {len(scenes)} صحنه، حدود {int((time.time() - _t0) / 60)} دقیقه."
+                return f"✅ فیلم آماده شد: {len(scenes)} کلیپ، حدود {int((time.time() - _t0) / 60)} دقیقه."
 
             if not start_job("مرحله‌ی ۲ و ۳ — ویدیوها", _work):
                 JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
@@ -922,10 +949,10 @@ def _(JOB, LOCK, PROJECT, mo, redo_dd, redo_img_btn, redo_vid_btn, save_project)
             with LOCK:
                 if redo_img_btn.value:
                     _s.update(image=None, video=None)
-                    _msg = f"🖼 تصویر صحنه‌ی {_i + 1} پاک شد؛ «🖼 ساخت تصویر صحنه‌ها» تصویر تازه می‌سازد."
+                    _msg = f"🖼 تصویر کلیپ {_i + 1} پاک شد؛ «🖼 ساخت تصویر صحنه‌ها» تصویر تازه می‌سازد."
                 else:
                     _s.update(video=None)
-                    _msg = f"🎬 ویدیوی صحنه‌ی {_i + 1} پاک شد؛ «🎬 ساخت ویدیوها» آن را دوباره می‌سازد."
+                    _msg = f"🎬 ویدیوی کلیپ {_i + 1} پاک شد؛ «🎬 ساخت ویدیوها» آن را دوباره می‌سازد."
                 PROJECT["final"] = None
             save_project()
             JOB.update(error=None, title="", message=_msg)
@@ -1089,8 +1116,9 @@ def _(H, PROJECT, absp, get_rev, mo):
             _b = '<span class="y-badge">🖼 تصویر آماده</span>'
         else:
             _b = '<span class="y-wait">⏳ در صف</span>'
-        _body = [H(f'<div class="y-root"><b>صحنه {_i}</b> {_b}'
-                   f'<div class="y-muted y-ltr" style="margin-top:4px">{_s["text"]}</div></div>')]
+        _shots = _s.get("shots") or [_s["text"]]
+        _lst = "".join(f'<div class="y-muted y-ltr" style="margin-top:3px">🎬 {t}</div>' for t in _shots)
+        _body = [H(f'<div class="y-root"><b>کلیپ {_i}</b> <span class="y-wait">{len(_shots)} نما</span> {_b}{_lst}</div>')]
         if _s.get("video"):
             _body.append(_video(_s["video"], "⬇️ دانلود صحنه"))
         elif _s.get("image"):
@@ -1115,7 +1143,7 @@ def _(
     F, H, R, aspect_dd, backup_btn, backup_view, card, cast_ms, char_add, char_del_btn, char_del_dd, char_look,
     char_name, char_role, char_upload, chars_view, final_view, hf_token, img_btn, merge_btn, mo, quality_dd,
     redo_dd, redo_img_btn, redo_vid_btn, reset_btn, restore_btn, restore_file, scenes_in, scenes_view, sec,
-    sec_dd, seed_in, sfx_in, stop_btn, story_in, style_dd, vid_btn,
+    sec_dd, seed_in, sfx_in, shots_dd, stop_btn, story_in, style_dd, vid_btn,
 ):
     # ───────────── چیدمان صفحه ─────────────
     _tab_chars = mo.hstack([
@@ -1136,9 +1164,11 @@ def _(
                  F("صدا و موسیقی (خالی = موسیقی سینمایی + صداهای واقعی)", sfx_in)),
         ], gap=1),
         card(sec("تنظیمات فیلم", step="۳"),
-             R(style_dd), R(mo.hstack([aspect_dd, quality_dd], justify="start", gap=1, wrap=True)), R(sec_dd),
+             R(style_dd), R(mo.hstack([aspect_dd, quality_dd], justify="start", gap=1, wrap=True)),
+             R(mo.hstack([shots_dd, sec_dd], justify="start", gap=1, wrap=True)),
              H('<div class="y-root y-muted">720p مطمئن‌ترین است. 1080p اگر حافظه کم بیاید، خودش به 720p برمی‌گردد. '
-               'هر صحنه با تصویر خودش شروع می‌شود و صحنه‌ها مثل فیلم سینمایی به هم کات می‌خورند.</div>')),
+               '<br><b>نماها:</b> با «۲ نما در هر کلیپ»، هر دو خطِ صحنه‌ها با هم در یک کلیپ ساخته می‌شوند تا چهره‌ها '
+               'و مکان بینشان ثابت بماند (قابلیت چندنمای LTX 2.5). مثلاً ۱۲ خط و کلیپ ۱۰ ثانیه‌ای = ۶ کلیپ = حدود ۱ دقیقه.</div>')),
     ], widths=[1.4, 1], gap=1.5, align="start")
 
     _steps = card(
@@ -1149,11 +1179,11 @@ def _(
         R(mo.hstack([img_btn, vid_btn], justify="start", gap=1, wrap=True)),
         R(mo.hstack([stop_btn, merge_btn, reset_btn], justify="start", gap=1, wrap=True)),
     )
-    _redo = card(sec("🔁 درست کردن یک صحنه"),
+    _redo = card(sec("🔁 درست کردن یک کلیپ"),
                  R(mo.hstack([redo_dd, redo_img_btn, redo_vid_btn], justify="start", gap=1, wrap=True)))
     _final = card(sec("🏁 فیلم نهایی"), final_view) if final_view is not None else mo.md("")
     _tab_make = mo.hstack([
-        mo.vstack([_final, card(sec("🎞 صحنه‌ها"), scenes_view)], gap=1),
+        mo.vstack([_final, card(sec("🎞 کلیپ‌ها"), scenes_view)], gap=1),
         mo.vstack([_steps, _redo], gap=1),
     ], widths=[1.6, 1], gap=1.5, align="start")
 
