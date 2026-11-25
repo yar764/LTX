@@ -635,7 +635,9 @@ def _(Path, os):
                 try:
                     _p = os.path.join(_dp, _f)
                     if not os.path.islink(_p):
-                        _tot += os.path.getsize(_p)
+                        # حجم واقعی روی دیسک (نه حجم اعلام‌شده): دانلودگر xet فایل را از اول با اندازه‌ی کامل
+                        # و خالی می‌سازد و بعد پرش می‌کند؛ getsize آن را «دانلودشده» نشان می‌داد
+                        _tot += os.stat(_p).st_blocks * 512
                 except OSError:
                     pass
         return _tot / 1e9
