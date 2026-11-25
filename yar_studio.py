@@ -36,8 +36,6 @@ def _():
     import marimo as mo
     import os
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-    # دانلود پرسرعت Hugging Face: چند تکه‌ی فایل هم‌زمان دانلود می‌شود
-    os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
     import gc, json, time, random, shutil, subprocess, hashlib, traceback, threading, zipfile, re
     from pathlib import Path
     from PIL import Image
