@@ -610,7 +610,8 @@ def _(LOCK, PROJECT, cast_ms, save_project):
 def _(Path, os):
     def hf_cache_gb():
         """حجم فایل‌های دانلودشده‌ی Hugging Face (برای نمایش پیشرفت دانلود)"""
-        _root = Path(os.environ.get("HF_HUB_CACHE") or Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub")
+        # کل پوشه‌ی Hugging Face: هم فایل‌های نهایی (hub) هم تکه‌های در حال دانلود (xet)
+        _root = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
         _tot = 0
         for _dp, _dn, _fn in os.walk(_root):
             for _f in _fn:
