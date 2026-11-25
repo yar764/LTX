@@ -425,10 +425,10 @@ def _(DURATIONS, EDIT_ID, FPS, Image, LTX_ID, STAGE1, SINGLE, gc, inspect, np, s
             return self.pipe(**_accepts(self.pipe.__call__, _kw)).images[0]
 
         # ─────────── ویرایش با عکس مرجع (حفظ چهره) ───────────
-        def edit(self, images, prompt, h, w, seed, token, steps=40):
+        def edit(self, images, prompt, h, w, seed, token, steps=40, negative=" "):
             self._ensure("edit", EDIT_ID, token)
             _g = torch.Generator("cuda").manual_seed(seed)
-            _kw = dict(image=[i.convert("RGB") for i in images], prompt=prompt, negative_prompt=" ",
+            _kw = dict(image=[i.convert("RGB") for i in images], prompt=prompt, negative_prompt=negative,
                        true_cfg_scale=4.0, guidance_scale=1.0, num_inference_steps=steps,
                        height=h, width=w, generator=_g,
                        callback_on_step_end=self._cb("حفظ چهره با عکس مرجع", steps))
@@ -684,9 +684,19 @@ def _(FPS, Image, absp, ffmpeg_exe, re, subprocess):
         _order = {5: [0, 1, 2, 3, 5], 6: [0, 1, 2, 3, 5, 6], 7: [0, 1, 2, 3, 4, 5, 6]}[n]
         return "\n".join(_beats[i] for i in _order)
 
+    def load_rgb(path):
+        """عکس شفاف (PNG بدون پس‌زمینه) روی زمینه‌ی سفید؛ وگرنه پس‌زمینه سیاه می‌شود"""
+        _im = Image.open(path)
+        if _im.mode in ("RGBA", "LA", "P"):
+            _im = _im.convert("RGBA")
+            _bg = Image.new("RGB", _im.size, (255, 255, 255))
+            _bg.paste(_im, mask=_im.split()[-1])
+            return _bg
+        return _im.convert("RGB")
+
     def collage(paths, h=768, gap=24):
         """چند عکس کاراکتر کنار هم (بدون هوش مصنوعی؛ چهره‌ها دست نمی‌خورند)"""
-        _ims = [Image.open(p).convert("RGB") for p in paths]
+        _ims = [load_rgb(p) for p in paths]
         _ims = [i.resize((max(1, round(i.width * h / i.height)), h), Image.LANCZOS) for i in _ims]
         _W = sum(i.width for i in _ims) + gap * (len(_ims) + 1)
         _c = Image.new("RGB", (_W, h + 2 * gap), (245, 245, 245))
@@ -707,7 +717,7 @@ def _(FPS, Image, absp, ffmpeg_exe, re, subprocess):
             _idx = first_index + _i
             if len(_g) == 1:
                 _n, _p, _look = _g[0]
-                _imgs.append(Image.open(_p).convert("RGB"))
+                _imgs.append(load_rgb(_p))
                 _desc.append(f"Image {_idx} is a reference photo of {_n}"
                              + (f" ({_look.rstrip('.')})" if _look else "") + ".")
             else:
@@ -770,7 +780,9 @@ def _(BATTLE_LENGTHS, BATTLE_MODES, PROJECT, QUALITIES, mo):
                            label="مدت فیلم")
     b_mode = mo.ui.dropdown(options=list(BATTLE_MODES), value=_bo("b_mode", BATTLE_MODES, list(BATTLE_MODES)[0]),
                             label="نوع پیوستگی")
-    b_quality = mo.ui.dropdown(options=QUALITIES, value=_bo("b_quality", QUALITIES, "1080p (1920×1080)"), label="کیفیت")
+    b_quality = mo.ui.dropdown(options=QUALITIES, value=_bo("b_quality", QUALITIES, "720p (1280×720)"), label="کیفیت")
+    b_pause = mo.ui.checkbox(value=bool(_d.get("b_pause", True)),
+                             label="⏸ بعد از ساخت صحنه‌ی آغاز صبر کن تا اول آن را ببینم")
     b_lock = mo.ui.checkbox(value=bool(_d.get("b_lock", True)),
                             label="🔒 قفل چهره در هر شات (چهره‌ها تا آخر فیلم عوض نشوند)")
     b_sfx = mo.ui.text(label="صدا و موسیقی (خالی = موسیقی حماسی + صدای ضربه و انفجار)", value=_d.get("b_sfx", ""),
@@ -780,7 +792,8 @@ def _(BATTLE_LENGTHS, BATTLE_MODES, PROJECT, QUALITIES, mo):
     b_undo_btn = mo.ui.run_button(label="↩️ حذف آخرین شات نبرد", kind="warn")
     b_reset_btn = mo.ui.run_button(label="🔄 شروع نبرد جدید", kind="danger")
     b_merge_btn = mo.ui.run_button(label="🎞 ساخت دوباره‌ی فیلم نهایی")
-    return b_desc, b_go_btn, b_len, b_lock, b_merge_btn, b_mode, b_plan_btn, b_quality, b_reset_btn, b_sfx, b_undo_btn
+    return (b_desc, b_go_btn, b_len, b_lock, b_merge_btn, b_mode, b_pause, b_plan_btn, b_quality, b_reset_btn, b_sfx,
+            b_undo_btn)
 
 
 @app.cell(hide_code=True)
@@ -804,11 +817,11 @@ def _(PROJECT, get_brev, mo):
 
 
 @app.cell(hide_code=True)
-def _(LOCK, PROJECT, b_chars, b_desc, b_len, b_lock, b_mode, b_plan, b_quality, b_sfx, save_project):
+def _(LOCK, PROJECT, b_chars, b_desc, b_len, b_lock, b_mode, b_pause, b_plan, b_quality, b_sfx, save_project):
     with LOCK:
         PROJECT["drafts"].update(
             b_chars=list(b_chars.value), b_desc=b_desc.value, b_len=b_len.value, b_mode=b_mode.value,
-            b_quality=b_quality.value, b_lock=b_lock.value, b_sfx=b_sfx.value, b_plan=b_plan.value,
+            b_quality=b_quality.value, b_lock=b_lock.value, b_pause=b_pause.value, b_sfx=b_sfx.value, b_plan=b_plan.value,
         )
     save_project()
     return
@@ -979,7 +992,7 @@ def _(BATTLE_LENGTHS, JOB, LOCK, PROJECT, b_chars, b_len, b_plan_btn, make_battl
 @app.cell(hide_code=True)
 def _(
     BATTLE_MODES, BATTLE_SFX, DURATIONS, EDIT_SIZE, FINAL, Image, JOB, LOCK, OUT, PROJECT, STYLES, absp,
-    aspect_dd, b_chars, b_desc, b_go_btn, b_lock, b_mode, b_plan, b_quality, b_sfx, best_end_frame,
+    aspect_dd, b_chars, b_desc, b_go_btn, b_lock, b_mode, b_pause, b_plan, b_quality, b_sfx, best_end_frame,
     cast_refs, concat_videos, encode_mp4, engine, hf_token, mo, pick_seed, rel, save_project, start_job,
     style_dd, time,
 ):
@@ -996,12 +1009,13 @@ def _(
         JOB.update(error=None, title="", message="✅ این نبرد کامل است. برای نبرد تازه «🔄 شروع نبرد جدید» را بزنید.")
         JOB["version"] += 1
     else:
-        def _launch():
+        def _launch(_names, _beats):
             _chars = PROJECT["chars"]
             _cast = [(n, str(absp(_chars[n]["image"])), _chars[n].get("look", "")) for n in _names]
             _fight = {n: _chars[n].get("fight", "") for n in _names}
             _mode = BATTLE_MODES[b_mode.value]
             _lock = b_lock.value
+            _pause = b_pause.value
             _q, _asp, _tok = b_quality.value, aspect_dd.value, hf_token.value.strip()
             _style = STYLES[style_dd.value]
             _desc = b_desc.value.strip().rstrip(".")
@@ -1016,10 +1030,20 @@ def _(
             _moves = " ".join(f"{n}'s fighting style: {f.rstrip('.')}." for n, f in _fight.items() if f)
             _faces = (f"The faces of {_all} must be exactly identical to their reference photos: same facial structure, "
                       "eyes, nose, mouth, skin tone, age, hair, costume, armor and weapons.")
+            _weapons = ("Each fighter carries and uses ONLY the exact weapons shown in their own reference photo and "
+                        "described above, held exactly the same way; nobody holds any extra or different weapon "
+                        "(no swords, guns or spears unless they are in that fighter's reference photo).")
+            _real = ("Photorealistic live-action movie still from a big-budget Hollywood film, shot on ARRI Alexa 65 with "
+                     "anamorphic lenses, real actors in real practical costumes, realistic skin texture with pores, sweat "
+                     "and dirt, real snow, fog and fire, physically accurate lighting, natural film color grading, subtle "
+                     "film grain. Not an illustration, not a painting, not 3D animation, not a video game render.")
+            _neg = ("cartoon, anime, illustration, painting, drawing, concept art, digital art, 3d render, CGI look, "
+                    "video game graphics, animation, plastic skin, waxy face, oversaturated colors, extra weapons, "
+                    "wrong weapon, sword in the wrong hands, extra limbs, extra fingers, deformed hands, blurry, text, watermark")
 
             def _shot_prompt(beat, continued):
-                _p = [_style + ".",
-                      "Epic live-action blockbuster battle scene, photorealistic, realistic VFX, intense fast fluid fight "
+                _p = [_style + ".", _real,
+                      "Epic live-action blockbuster battle scene, realistic VFX, intense fast fluid fight "
                       "choreography, powerful impacts with real weight."]
                 if _desc:
                     _p.append(_desc + ".")
@@ -1027,6 +1051,7 @@ def _(
                     _p.append(_looks)
                 if _moves:
                     _p.append(_moves)
+                _p.append(_weapons)
                 if continued:
                     _p.append("The shot continues seamlessly from the opening frame: same location, lighting and color grade.")
                 _p.append(f"{_all} keep exactly the same faces, bodies, costumes, armor and weapons as in the opening "
@@ -1038,7 +1063,7 @@ def _(
             def _key_prompt(beat, with_scene):
                 _refs_first = 2 if with_scene else 1
                 _imgs, _rdesc = cast_refs(_cast, _refs_first, 3 - (1 if with_scene else 0))
-                _p = [_style + "."]
+                _p = [_style + ".", _real]
                 if with_scene:
                     _p.append("Image 1 is an earlier frame of this same battle: keep the same location, weather, lighting, "
                               "costumes, armor and weapons.")
@@ -1048,7 +1073,8 @@ def _(
                           + (_desc + ". " if _desc else "") + beat.rstrip(".") + ".")
                 if _moves:
                     _p.append(_moves)
-                _p.append(_faces + f" All of {_all} clearly visible, dynamic action poses, weapons in hand, sharp focus, "
+                _p.append(_weapons)
+                _p.append(_faces + f" All of {_all} clearly visible, dynamic action poses, sharp focus, "
                           "photorealistic, no text, no watermark.")
                 return _imgs, " ".join(_p)
 
@@ -1069,7 +1095,10 @@ def _(
                 if "0" not in _B["keys"]:
                     JOB["title"] = f"نبرد — صحنه‌ی آغاز (۱ از {_n})"
                     _imgs, _p = _key_prompt(_beats[0], False)
-                    _save_key(engine.edit(_imgs, _p, _eh, _ew, pick_seed(), _tok), 0)
+                    _save_key(engine.edit(_imgs, _p, _eh, _ew, pick_seed(), _tok, negative=_neg), 0)
+                    if _pause and not _B["shots"]:
+                        return ("🖼 صحنه‌ی آغاز ساخته شد. نگاهش کنید: اگر خوب است دوباره «⚔️ ساخت / ادامه‌ی نبرد» را "
+                                "بزنید. اگر نه، «↩️ حذف آخرین شات» را بزنید تا صحنه‌ی تازه‌ای ساخته شود.")
                 _first = Image.open(absp(_B["keys"]["0"])).convert("RGB")
                 if _mode == "cut":
                     for _k in range(1, _n):
@@ -1077,7 +1106,7 @@ def _(
                             continue
                         JOB["title"] = f"نبرد — فریم کلیدی شات {_k + 1} از {_n}"
                         _imgs, _p = _key_prompt(_beats[_k], True)
-                        _save_key(engine.edit([_first] + _imgs, _p, _eh, _ew, pick_seed(), _tok), _k)
+                        _save_key(engine.edit([_first] + _imgs, _p, _eh, _ew, pick_seed(), _tok, negative=_neg), _k)
                 # ── شات‌ها
                 for _k in range(len(_B["shots"]), _n):
                     _seed = pick_seed()
@@ -1096,7 +1125,7 @@ def _(
                             _w0, _h0 = _start.size
                             _s = (1_300_000 / (_w0 * _h0)) ** 0.5
                             _lh, _lw = max(512, int(_h0 * _s) // 16 * 16), max(512, int(_w0 * _s) // 16 * 16)
-                            _start = engine.edit([_start] + _imgs, _ep, _lh, _lw, _seed, _tok)
+                            _start = engine.edit([_start] + _imgs, _ep, _lh, _lw, _seed, _tok, negative=_neg)
                     JOB["title"] = f"نبرد — ساخت شات {_k + 1} از {_n} (۱۰ ثانیه)"
                     _prompt = _shot_prompt(_beats[_k], _cont)
                     try:
@@ -1135,7 +1164,7 @@ def _(
             if not start_job("نبرد سینمایی", _work):
                 JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
                 JOB["version"] += 1
-        _launch()
+        _launch(_names, _beats)
     return
 
 
@@ -1184,7 +1213,7 @@ def _(JOB, LOCK, OUT, PROJECT, b_merge_btn, concat_videos, mo, rel, save_project
         JOB.update(error=None, title="", message="⚠️ هنوز شات نبردی ساخته نشده.")
         JOB["version"] += 1
     else:
-        def _launch():
+        def _launch(_B):
             def _work():
                 JOB["detail"] = "چسباندن شات‌ها…"
                 _out = concat_videos(_B["shots"], OUT / "final" / f"battle_{int(time.time())}.mp4")
@@ -1196,14 +1225,14 @@ def _(JOB, LOCK, OUT, PROJECT, b_merge_btn, concat_videos, mo, rel, save_project
             if not start_job("فیلم نهایی نبرد", _work):
                 JOB["message"] = "⏳ یک کار دیگر در حال انجام است."
                 JOB["version"] += 1
-        _launch()
+        _launch(_B)
     return
 
 
 @app.cell(hide_code=True)
 def _(
     H, PROJECT, absp, b_chars, b_desc, b_fight_char, b_fight_save, b_fight_text, b_go_btn, b_len, b_lock,
-    b_merge_btn, b_mode, b_plan, b_plan_btn, b_quality, b_reset_btn, b_sfx, b_undo_btn, get_rev, mo,
+    b_merge_btn, b_mode, b_pause, b_plan, b_plan_btn, b_quality, b_reset_btn, b_sfx, b_undo_btn, get_rev, mo,
 ):
     get_rev()
 
@@ -1261,7 +1290,7 @@ def _(
         _card(_sec("🎬 نبرد"),
               _R(b_desc),
               _R(mo.hstack([b_len, b_quality], justify="start", gap=1, wrap=True)),
-              _R(b_mode), _R(b_lock),
+              _R(b_mode), _R(b_lock), _R(b_pause),
               _R(b_plan_btn), _R(b_plan), _R(b_sfx),
               H('<div class="yar-muted yar-root">هر شات حدود ۵ تا ۸ دقیقه طول می‌کشد؛ کل نبرد ۱ دقیقه‌ای حدود '
                 '۳۰ تا ۵۰ دقیقه. اگر وسط کار قطع شد، دوباره «ساخت / ادامه» بزنید؛ از همان‌جا ادامه می‌دهد.</div>'),
