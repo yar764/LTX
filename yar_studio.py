@@ -512,11 +512,13 @@ def _(H, disk_free_gb, read_env_token, torch):
     else:
         _gpu = "❌ GPU روشن نیست — از دکمه‌ی مشخصات بالای صفحه RTX Pro 6000 را انتخاب کنید"
     _disk = disk_free_gb()
+    # بعضی دیسک‌های molab عدد بی‌معنی (خیلی بزرگ) برمی‌گردانند
+    _dk = f"💽 دیسک آزاد: {_disk:.0f} GB" if 0 <= _disk < 100000 else "💽 دیسک: بدون محدودیت مشخص"
     _tok = "✅ توکن Hugging Face" if read_env_token() else "🔑 توکن را در تب «⚙️ تنظیمات» بگذارید"
     H(f"""<div class="y-root"><div class="y-head">
       <div style="font-size:28px;font-weight:900;letter-spacing:.5px">Ƴα૨ Studio</div>
       <div style="opacity:.92;margin-top:2px">استودیوی فیلم سینمایی با LTX 2.5 — شخصیت‌ها ← داستان ← تصویر صحنه‌ها ← فیلم</div>
-      <span class="y-pill">{_gpu}</span><span class="y-pill">💽 دیسک آزاد: {_disk:.0f} GB</span><span class="y-pill">{_tok}</span>
+      <span class="y-pill">{_gpu}</span><span class="y-pill">{_dk}</span><span class="y-pill">{_tok}</span>
     </div></div>""")
     return
 
